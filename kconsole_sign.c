@@ -17,10 +17,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <openssl/err.h>
-#include <openssl/sha.h>
+#include <openssl/hmac.h>
 
 #define KCONSOLE_CACHE_SIZE 1680
-#define SHA256_BLOCK_SIZE 64
+#define SHA256_HASH_SIZE 32
 
 const unsigned char key[] = {0xB7, 0x39, 0x66, 0x32, 0x0E, 0x28, 0x6A, 0xDC, 0x03, 0xF0, 0x54, 0x65, 0xCA, 0x9E, 0x2F, 0x92, 0x38, 0x8A, 0xEE, 0x23, 0x6D, 0x43, 0x88, 0x31, 0x35, 0xBA, 0xB0, 0xA5, 0xBD, 0x50, 0x43, 0xEA};
 const unsigned char expire[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -29,10 +29,10 @@ int
 main (int argc, const char *argv[])
 {
     FILE *infp, *outfp;
-    SHA256_CTX sha;
+    HMAC_CTX ctx;
     unsigned char kconsole_cache[KCONSOLE_CACHE_SIZE];
-    unsigned char key_blk[SHA256_BLOCK_SIZE];
-    unsigned char hash[SHA256_DIGEST_LENGTH];
+    unsigned char hmac[SHA256_HASH_SIZE];
+    unsigned int len;
     int i;
 
     if (argc < 3)
@@ -55,21 +55,9 @@ main (int argc, const char *argv[])
         return 1;
     }
 
-    // first time hash
-    if (!SHA256_Init (&sha))
-    {
-        ERR_print_errors_fp (stderr);
-        goto error;
-    }
-
-    memset (key_blk, 0, SHA256_BLOCK_SIZE);
-    memcpy (key_blk, key, sizeof (key));
-    for (i = 0; i < SHA256_BLOCK_SIZE; i++)
-    {
-        key_blk[i] ^= 0x36;
-    }
-
-    if (!SHA256_Update (&sha, key_blk, SHA256_BLOCK_SIZE))
+    // hmac init
+    HMAC_CTX_init (&ctx);
+    if (!HMAC_Init_ex (&ctx, key, sizeof (key), EVP_sha256 (), NULL))
     {
         ERR_print_errors_fp (stderr);
         goto error;
@@ -84,7 +72,7 @@ main (int argc, const char *argv[])
     // patch time
     memcpy (&kconsole_cache[KCONSOLE_CACHE_SIZE-sizeof (expire)], expire, sizeof (expire));
 
-    if (!SHA256_Update (&sha, kconsole_cache, KCONSOLE_CACHE_SIZE))
+    if (!HMAC_Update (&ctx, kconsole_cache, KCONSOLE_CACHE_SIZE))
     {
         ERR_print_errors_fp (stderr);
         goto error;
@@ -96,43 +84,13 @@ main (int argc, const char *argv[])
         goto error;
     }
 
-    if (!SHA256_Final (hash, &sha))
+    if (!HMAC_Final (&ctx, hmac, &len))
     {
         ERR_print_errors_fp (stderr);
         goto error;
     }
 
-    // second time hash
-    if (!SHA256_Init (&sha))
-    {
-        ERR_print_errors_fp (stderr);
-        goto error;
-    }
-
-    for (i = 0; i < SHA256_BLOCK_SIZE; i++)
-    {
-        key_blk[i] ^= 0x6A;
-    }
-
-    if (!SHA256_Update (&sha, key_blk, SHA256_BLOCK_SIZE))
-    {
-        ERR_print_errors_fp (stderr);
-        goto error;
-    }
-
-    if (!SHA256_Update (&sha, hash, SHA256_DIGEST_LENGTH))
-    {
-        ERR_print_errors_fp (stderr);
-        goto error;
-    }
-
-    if (!SHA256_Final (hash, &sha))
-    {
-        ERR_print_errors_fp (stderr);
-        goto error;
-    }
-
-    if (fwrite (hash, SHA256_DIGEST_LENGTH, 1, outfp) < 1)
+    if (fwrite (hmac, SHA256_HASH_SIZE, 1, outfp) < 1)
     {
         perror ("write output");
         goto error;
