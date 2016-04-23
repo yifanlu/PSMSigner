@@ -53,8 +53,6 @@ const char pem_key[] =
     "rnh1i22Y3zLWChh3swswqgf7\n"
     "-----END PRIVATE KEY-----\n";
 
-const unsigned int pad_hdr[] = {0x30313000, 0x6009060D, 0x65014886, 0x01020403, 0x20040005};
-
 int
 hash_with_date (const char *path, FILE *fout, unsigned char hash[SHA256_DIGEST_LENGTH])
 {
@@ -113,30 +111,14 @@ hash_with_date (const char *path, FILE *fout, unsigned char hash[SHA256_DIGEST_L
 }
 
 int
-generate_padding (unsigned char data[32], unsigned char output[256])
-{
-    int i;
-
-    *(int *)&output[0] = 0xFFFF0100;
-    memset (&output[4], 0xFF, 200);
-    for (i = 0; i < 5; i++)
-    {
-        *(int *)&output[204+4*i] = pad_hdr[i];
-    }
-    memcpy (&output[224], data, 32);
-
-    return 0;
-}
-
-int
 main (int argc, const char *argv[])
 {
     BIO *bio;
     RSA *rsa;
     FILE *fout;
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    unsigned char padding[256];
     unsigned char sig[256];
+    unsigned int siglen;
 
     if (argc < 3)
     {
@@ -171,13 +153,7 @@ main (int argc, const char *argv[])
         goto error;
     }
 
-    if (generate_padding (hash, padding) < 0)
-    {
-        fprintf (stderr, "cannot generate RSA padding\n");
-        goto error;
-    }
-
-    if (RSA_private_encrypt (sizeof (padding), padding, sig, rsa, RSA_NO_PADDING) < 0)
+    if (RSA_sign (NID_sha256, hash, SHA256_DIGEST_LENGTH, sig, &siglen, rsa) != 1)
     {
         ERR_print_errors_fp (stderr);
         return 1;
